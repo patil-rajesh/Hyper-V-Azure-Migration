@@ -30,10 +30,6 @@
 - [Phase 14 — Plan Migration Waves](#phase-14--plan-migration-waves)
 - [Phase 15 — Run the Migration](#phase-15--run-the-migration)
 - [Phase 16 — Validate the Target Environment](#phase-16--validate-the-target-environment)
-- [Troubleshooting](#-troubleshooting)
-- [Repository Structure](#-repository-structure)
-- [Roadmap](#-roadmap)
-- [Lessons Learned](#-lessons-learned)
 - [Author](#-author)
 
 ---
