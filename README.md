@@ -24,6 +24,8 @@ The lab includes:
 
 ## Source Environment
 
+![Hyper-V]("screenshots/hyper-v-env.png")
+
 ```text
 192.168.100.0/24
 
