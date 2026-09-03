@@ -190,6 +190,7 @@ Portal → HVHOST01 → Connect → RDP → download RDP file
 Username : azureadmin
 Password : <your password>
 ```
+![Hyper-V lab architecture](screenshots/Server-Manager.png)
 
 ### Step 2: Check virtualization support
 
@@ -416,6 +417,18 @@ Add tools: Migration and modernization + Discovery and assessment
 
 ![Azure Migrate project overview](screenshots/Migrate-Overview.png)
 
+**Important : Before Aplliance Discovery setup WinRM**
+**HVHOST, SQL01, WEB01**
+```text
+winrm quickconfig
+Enable-PSRemoting -Force
+Set-Service WinRM -StartupType Automatic
+Start-Service WinRM
+Enable-NetFirewallRule `-DisplayGroup "Windows Remote Management"
+Test-WsMan localhost
+whoami
+hostname
+```
 ---
 
 ## Phase 9 — Deploy & Configure the Migrate Appliance
@@ -434,8 +447,33 @@ Browse to             : https://<appliance-name-or-ip>:44368
 Configure             : time sync → install updates → set credentials
 Register              : paste the project key generated above
 ```
+
+![Hyper-V lab architecture](screenshots/hyper-v-env.png)
+
+Connect to the Appliance and Network Configuration, Then Open Browser......
+```text
+New-NetIPAddress `
+-InterfaceAlias "Ethernet" `
+-IPAddress 192.168.100.30 `
+-PrefixLength 24 `
+-DefaultGateway 192.168.100.1
+
+Set-DnsClientServerAddress `
+-InterfaceAlias "Ethernet" `
+-ServerAddresses 8.8.8.8,1.1.1.1
+
+Get-Date
+w32tm /resync
+
+Set-Item `
+WSMan:\localhost\Client\TrustedHosts ` -Value * ` -Force
+Restart-Service WinRM
+
+```
+
 ![Appliance configuration and registration](screenshots/Appliance-setting.png)
 
+Appliance registered Successfully......
 ![Azure Migrate appliance deployment](screenshots/Appliance.png)
 
 ---
@@ -548,80 +586,10 @@ Checklist:
 
 ---
 
-## 🩹 Troubleshooting
-
-<details>
-<summary><strong>"A hypervisor has been detected. Features required for Hyper-V will not be displayed."</strong></summary>
-
-This is expected on an Azure VM and is generally a **good sign** — Windows detects it's already running
-under a hypervisor (Azure's own virtualization layer), so it can't enumerate the underlying Hyper-V
-requirement flags the normal way.
-
-Verify nested virtualization is actually working with:
-
-```powershell
-Get-WindowsFeature Hyper-V
-Get-VMHost
-New-VM -Name TestVM -MemoryStartupBytes 1GB
-Get-VM
-```
-
-If `TestVM` shows up with state `Off`, nested virtualization is functioning correctly.
-</details>
-
-<details>
-<summary><strong>VM size not available in my region / student subscription</strong></summary>
-
-Try, in order: `Standard_D4s_v5` → `Standard_D4as_v5` → `Standard_D4s_v4`. Student subscriptions often
-have tighter regional quota — East US, East US 2, and Central US tend to have the best availability.
-</details>
-
-<details>
-<summary><strong>Trusted Launch breaks nested VM creation</strong></summary>
-
-Always select **Security Type: Standard** for `HVHOST01`. Trusted Launch enforces Secure Boot/vTPM
-restrictions incompatible with nested virtualization.
-</details>
-
-
-## 🗺️ Roadmap
-
-```text
-[x] Provision HVHOST01 in Azure
-[x] Enable nested virtualization + internal switch
-[x] Build SQL01 and WEB01 nested VMs
-[x] Install SQL Server Express + create EmployeeDB
-[x] Install IIS + static test page
-[x] Deploy and register the Azure Migrate appliance
-[x] Run discovery + dependency mapping
-[x] Run assessment
-[x] Enable replication
-[x] Plan migration waves
-[x] Execute migration to native Azure VMs
-[ ] Build ASP.NET Employee Portal with live SQL connectivity
-[ ] Post-migration cost comparison (on-prem-simulated vs. native Azure)
-```
-
----
-
-## 🎓 Lessons Learned
-
-- Azure VMs report Hyper-V requirement checks differently than bare-metal hosts because they're already
-  virtualized — the "hypervisor detected" message is a pass, not a failure.
-- **Security Type: Standard** (not Trusted Launch) is required for the host VM to support nested
-  virtualization.
-- Dependency mapping caught the WEB01 → SQL01 relationship automatically, which made grouping both
-  servers into a single migration wave straightforward.
-- Auto-shutdown schedules are essential for keeping a multi-VM nested lab within student credit limits.
-
----
-
 ## 👤 Author
 
 **Rajesh Shankarrao Patil**
 Cloud / Migration Engineering — hands-on Azure Migrate lab project.
 
 ---
-
-*This project was documented and iterated with the help of an AI coding assistant; all infrastructure
-was built and validated hands-on in a live Azure Student subscription.*
+*all infrastructure was built and validated hands-on in a live Azure Student subscription.*
