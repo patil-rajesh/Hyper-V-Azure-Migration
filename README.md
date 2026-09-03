@@ -239,7 +239,21 @@ to `HVHOST01` as `C:\ISO\WS2022.iso`.
 
 ---
 
-## Phase 3 — Build the SQL Server VM (SQL01)
+## Phase 3 — Configure Internal Networking
+
+On `HVHOST01`, assign the host-side gateway IP on the internal switch:
+
+```powershell
+Get-NetAdapter
+
+New-NetIPAddress `
+    -IPAddress 192.168.100.1 `
+    -PrefixLength 24 `
+    -InterfaceAlias "vEthernet (InternalLabSwitch)"
+```
+
+
+## Phase 4 — Build the SQL Server VM (SQL01)
 
 ```powershell
 New-VM `
@@ -257,11 +271,29 @@ Set-VMDvdDrive -VMName SQL01 -Path "C:\ISO\WS2022.iso"
 Start-VM SQL01
 ```
 
-Connect via **Hyper-V Manager → Connect** and install Windows Server as usual.
+Connect via **Hyper-V Manager SQL01 → Connect** and install Windows Server as usual.
+On `SQL01`, assign the SQL01 IP and gateway IP on the internal switch:
+
+```powershell
+Get-NetAdapter
+
+New-NetIPAddress `
+-InterfaceAlias "Ethernet" `
+-IPAddress 192.168.100.20 `
+-PrefixLength 24 `
+-DefaultGateway 192.168.100.1
+
+Set-DnsClientServerAddress `
+-InterfaceAlias "Ethernet" `
+-ServerAddresses 8.8.8.8,1.1.1.1
+
+ipconfig
+
+```
 
 ---
 
-## Phase 4 — Build the Web Server VM (WEB01)
+## Phase 5 — Build the Web Server VM (WEB01)
 
 ```powershell
 New-VM `
@@ -278,37 +310,32 @@ Set-VMDvdDrive -VMName WEB01 -Path "C:\ISO\SERVER_EVAL_x64FRE_en-us.iso"
 
 Start-VM WEB01
 ```
-
----
-
-## Phase 5 — Configure Internal Networking
-
-On `HVHOST01`, assign the host-side gateway IP on the internal switch:
+Connect via **Hyper-V Manager WEB01 → Connect** as usual.
+On `WEB01`, assign the WEB01 IP and gateway IP on the internal switch:
 
 ```powershell
 Get-NetAdapter
 
 New-NetIPAddress `
-    -IPAddress 192.168.100.1 `
-    -PrefixLength 24 `
-    -InterfaceAlias "vEthernet (InternalLabSwitch)"
+-InterfaceAlias "Ethernet" `
+-IPAddress 192.168.100.10 `
+-PrefixLength 24 `
+-DefaultGateway 192.168.100.1
+
+Set-DnsClientServerAddress `
+-InterfaceAlias "Ethernet" `
+-ServerAddresses 8.8.8.8,1.1.1.1
+
+ipconfig
 ```
-
-Then, inside each guest OS, assign static IPs:
-
-```text
-VM         IP Address          Gateway
-------------------------------------------
-WEB01      192.168.100.10      192.168.100.1
-SQL01      192.168.100.20      192.168.100.1
-```
-
 ---
 
 ## Phase 6 — Install & Configure SQL Server (EmployeeDB)
 
 Inside `SQL01`, install **SQL Server Express 2022** and **SQL Server Management Studio (SSMS)**.
-
+```
+sqlcmd -S localhost\SQLEXPRESS -E
+```
 **Create the database:**
 
 ```sql
@@ -368,18 +395,37 @@ Inside `WEB01`:
 
 ```powershell
 Install-WindowsFeature Web-Server -IncludeManagementTools
+
+New-NetFirewallRule `
+-DisplayName "SQL Server 1433" `
+-Direction Inbound `
+-Protocol TCP `
+-LocalPort 1433 `
+-Action Allow
+
+```
+```C:\inetpub\wwwroot\EmployeePortal
+
+Restart-Service -Name MSSQL`$SQLEXPRESS 
+SQL Server Network Configuration
+→ Protocols for SQLEXPRESS
+TCP/IP = Enabled
 ```
 
-Verify at `http://localhost`, then create the site folder:
+```powershell
 
-```text
-C:\inetpub\wwwroot\EmployeePortal
-```
+Get-WindowsFeature Web-Server
+Get-Service W3SVC
+Start-Service W3SVC
 
-Start with a static test page:
+Import-Module WebAdministration
 
-```html
-<h1>Employee Portal</h1>
+New-Website `
+-Name EmployeePortal `
+-Port 8080 `
+-PhysicalPath "C:\inetpub\wwwroot\EmployeePortal"
+
+iisreset
 ```
 
 **Next milestone:** replace this with an ASP.NET page that connects to `SQL01`
@@ -393,9 +439,76 @@ ID    Name     Department
 3     Neha     HR
 4     Priya    DevOps
 ```
+**Note Important:** new file C:\inetpub\wwwroot\EmployeePortal\Employee.aspx with an ASP.NET page that connects to `SQL01`
+(`192.168.100.20`), queries `EmployeeDB`, and renders live rows:
+```
+sqlcmd -S localhost\SQLEXPRESS -E
 
+ALTER LOGIN sa ENABLE;
+GO
+ALTER LOGIN sa WITH PASSWORD = 'AzureLab@12345';
+GO
+reg add "HKLM\Software\Microsoft\Microsoft SQL Server\MSSQL16.SQLEXPRESS\MSSQLServer" /v LoginMode /t REG_DWORD /d 2 /f
+Restart-Service "MSSQL$SQLEXPRESS"
+
+SELECT name
+FROM sys.sql_logins;
+GO
+CREATE LOGIN WebUser
+WITH PASSWORD = 'Password@123';
+GO
+USE EmployeeDB;
+GO
+CREATE USER WebUser FOR LOGIN WebUser;
+GO
+ALTER ROLE db_datareader ADD MEMBER WebUser;
+GO
+SELECT SERVERPROPERTY('IsIntegratedSecurityOnly');
+GO
+
+```
+
+**Note Important:** on **HVHOST** add the network directivity for live the website...
+```Powershell
+Get-NetAdapter
+
+netsh interface portproxy add v4tov4 `
+listenport=80 `
+listenaddress=0.0.0.0 `
+connectport=8080 `
+connectaddress=192.168.100.10
+
+netsh interface portproxy show all
+
+New-NetFirewallRule `
+-DisplayName "WEB01 HTTP" `
+-Direction Inbound `
+-Protocol TCP `
+-LocalPort 80 `
+-Action Allow
+
+Azure add
+HVHOST01 VM
+→ Networking
+→ Inbound Security Rules
+→ Add
+Source: Any
+Port: 80
+Protocol: TCP
+Action: Allow
+Priority: 300
+
+Invoke-WebRequest http://192.168.100.10:8080
+
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=80 connectaddress=192.168.100.10 connectport=8080
+
+netsh interface portproxy show all
+
+New-NetFirewallRule -DisplayName "Website Port 80" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+
+netstat -ano | findstr :80
+```
 ---
-
 ## Phase 8 — Prepare for Azure Migrate
 
 With `WEB01` and `SQL01` up and running, create the Azure Migrate project:
